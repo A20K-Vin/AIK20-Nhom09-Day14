@@ -4,7 +4,10 @@ import os
 from typing import Dict, Any, List, Tuple
 
 from openai import AsyncOpenAI
-import google.generativeai as genai
+try:
+    import google.generativeai as genai
+except ImportError:
+    genai = None
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -51,15 +54,20 @@ Câu trả lời nào tốt hơn? Trả lời theo JSON:
 class LLMJudge:
     def __init__(self):
         self.openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.secondary_model_name = "gpt-4o-mini"
+        self._gemini_model = None
 
-        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-        self._gemini_model = genai.GenerativeModel(
-            "gemini-2.5-flash",
-            generation_config=genai.GenerationConfig(
-                response_mime_type="application/json",
-                temperature=0,
-            ),
-        )
+        google_api_key = os.getenv("GOOGLE_API_KEY")
+        if genai is not None and google_api_key:
+            genai.configure(api_key=google_api_key)
+            self._gemini_model = genai.GenerativeModel(
+                "gemini-2.5-flash",
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json",
+                    temperature=0,
+                ),
+            )
+            self.secondary_model_name = "gemini-2.5-flash"
 
         self.rubrics = {
             "accuracy": "Độ chính xác so với Ground Truth (1-5)",
@@ -89,6 +97,11 @@ class LLMJudge:
         }
 
     async def _call_gemini(self, prompt: str, model: str = "gemini-2.5-flash") -> Dict[str, Any]:
+        if self._gemini_model is None:
+            fallback = await self._call_gpt(prompt, model="gpt-4o-mini")
+            fallback["model"] = self.secondary_model_name
+            return fallback
+
         response = await self._gemini_model.generate_content_async(prompt)
         result = json.loads(response.text)
         tokens = response.usage_metadata.total_token_count if response.usage_metadata else 0
@@ -148,10 +161,10 @@ class LLMJudge:
         ground_truth: str,
         score_a: int,
         score_b: int,
-    ) -> Tuple[float, str]:
+    ) -> Tuple[float, str, int]:
         """
         Khi 2 judge lệch nhau > 1 điểm, gọi tiebreaker (gpt-4o-mini) để phân xử.
-        Trả về (final_score, method).
+        Trả về (final_score, method, extra_tokens).
         """
         prompt = _SCORING_PROMPT.format(
             question=question, answer=answer, ground_truth=ground_truth
@@ -159,9 +172,9 @@ class LLMJudge:
         try:
             tiebreaker = await self._call_gpt(prompt, model="gpt-4o-mini")
             scores = sorted([score_a, score_b, tiebreaker["score"]])
-            return float(scores[1]), "tiebreaker_median"
+            return float(scores[1]), "tiebreaker_median", int(tiebreaker.get("tokens", 0))
         except Exception:
-            return (score_a * 0.6 + score_b * 0.4), "weighted_average"
+            return (score_a * 0.6 + score_b * 0.4), "weighted_average", 0
 
     # ------------------------------------------------------------------
     # Main evaluation
@@ -194,15 +207,16 @@ class LLMJudge:
 
         conflict_resolved = False
         resolution_method = "average"
+        tiebreaker_tokens = 0
         if diff > 1:
-            final_score, resolution_method = await self._resolve_conflict(
+            final_score, resolution_method, tiebreaker_tokens = await self._resolve_conflict(
                 question, answer, ground_truth, score_gpt, score_gemini
             )
             conflict_resolved = True
         else:
             final_score = (score_gpt + score_gemini) / 2.0
 
-        total_tokens = result_gpt["tokens"] + result_gemini["tokens"]
+        total_tokens = result_gpt["tokens"] + result_gemini["tokens"] + tiebreaker_tokens
 
         return {
             "final_score": final_score,
@@ -210,11 +224,17 @@ class LLMJudge:
             "cohens_kappa": kappa,
             "individual_scores": {
                 "gpt-4o": score_gpt,
-                "gemini-2.5-flash": score_gemini,
+                self.secondary_model_name: score_gemini,
             },
             "reasoning": {
                 "gpt-4o": result_gpt["reasoning"],
-                "gemini-2.5-flash": result_gemini["reasoning"],
+                self.secondary_model_name: result_gemini["reasoning"],
+            },
+            "token_usage": {
+                "gpt-4o": result_gpt["tokens"],
+                self.secondary_model_name: result_gemini["tokens"],
+                "tiebreaker_gpt-4o-mini": tiebreaker_tokens,
+                "total_tokens": total_tokens,
             },
             "conflict_resolved": conflict_resolved,
             "resolution_method": resolution_method,
@@ -283,6 +303,9 @@ class LLMJudge:
         return result.get("winner", "tie")
 
     async def _call_gemini_pairwise(self, prompt: str) -> str:
+        if self._gemini_model is None:
+            return await self._call_gpt_pairwise(prompt)
+
         response = await self._gemini_model.generate_content_async(prompt)
         result = json.loads(response.text)
         return result.get("winner", "tie")

@@ -4,17 +4,41 @@ import os
 import time
 from engine.runner import BenchmarkRunner
 from engine.llm_judge import LLMJudge
+from engine.retrieval_eval import RetrievalEvaluator
 from agent.main_agent import MainAgent
 from engine.retrieval_eval import RetrievalEvaluator
 
-# Giả lập các components Expert
+
 class ExpertEvaluator:
+    def __init__(self):
+        self.retrieval_eval = RetrievalEvaluator()
+
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        return " ".join((text or "").lower().split())
+
+    @classmethod
+    def _token_overlap_ratio(cls, reference: str, candidate: str) -> float:
+        ref_tokens = set(cls._normalize_text(reference).split())
+        cand_tokens = set(cls._normalize_text(candidate).split())
+        if not ref_tokens:
+            return 0.0
+        return len(ref_tokens.intersection(cand_tokens)) / len(ref_tokens)
+
     async def score(self, case, resp):
-        # Giả lập tính toán Hit Rate và MRR
+        answer = resp.get("answer", "")
+        expected_context = case.get("context", "")
+        expected_answer = case.get("expected_answer", "")
+        retrieval_scores = self.retrieval_eval.evaluate_case(case, resp)
+
+        # Lightweight lexical proxy metrics (stable, no extra API cost)
+        faithfulness = self._token_overlap_ratio(expected_context, answer)
+        relevancy = self._token_overlap_ratio(expected_answer, answer)
+
         return {
-            "faithfulness": 0.9,
-            "relevancy": 0.8,
-            "retrieval": {"hit_rate": 1.0, "mrr": 0.5}
+            "faithfulness": round(min(1.0, faithfulness), 4),
+            "relevancy": round(min(1.0, relevancy), 4),
+            "retrieval": retrieval_scores,
         }
 
 # Dùng LLMJudge thực thay cho placeholder
@@ -34,17 +58,76 @@ async def run_benchmark_with_results(agent_version: str):
         print("❌ File data/golden_set.jsonl rỗng. Hãy tạo ít nhất 1 test case.")
         return None, None
 
-    runner = BenchmarkRunner(MainAgent(), ExpertEvaluator(), MultiModelJudge())
+    runner = BenchmarkRunner(
+        MainAgent(),
+        ExpertEvaluator(),
+        MultiModelJudge(),
+        max_concurrency=8,
+        timeout_seconds=45.0,
+        max_retries=1,
+    )
     results = await runner.run_all(dataset)
 
     total = len(results)
+    passed = [r for r in results if r["status"] == "pass"]
+    non_error = [r for r in results if r["status"] != "error"]
+    avg_latency = sum(r["latency"] for r in non_error) / len(non_error) if non_error else 0.0
+    p95_latency = (
+        sorted(r["latency"] for r in non_error)[max(0, int(0.95 * len(non_error)) - 1)]
+        if non_error
+        else 0.0
+    )
+    total_tokens = sum(r.get("token_usage", {}).get("total_tokens", 0) for r in results)
+    total_agent_tokens = sum(r.get("token_usage", {}).get("agent_total_tokens", 0) for r in results)
+    total_judge_tokens = sum(r.get("token_usage", {}).get("judge_tokens", 0) for r in results)
+    total_cost = sum(r.get("cost_usd_estimated", 0.0) for r in results)
+    judge_pairs_a = []
+    judge_pairs_b = []
+    for result in results:
+        individual_scores = result.get("judge", {}).get("individual_scores", {})
+        secondary_judges = [key for key in individual_scores.keys() if key != "gpt-4o"]
+        if "gpt-4o" in individual_scores and secondary_judges:
+            secondary_name = secondary_judges[0]
+            judge_pairs_a.append(individual_scores["gpt-4o"])
+            judge_pairs_b.append(individual_scores[secondary_name])
+    batch_kappa = (
+        LLMJudge.calculate_batch_kappa(judge_pairs_a, judge_pairs_b)
+        if judge_pairs_a and judge_pairs_b
+        else 0.0
+    )
+
     summary = {
-        "metadata": {"version": agent_version, "total": total, "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")},
+        "metadata": {
+            "version": agent_version,
+            "total": total,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        },
         "metrics": {
             "avg_score": sum(r["judge"]["final_score"] for r in results) / total,
             "hit_rate": sum(r["ragas"]["retrieval"]["hit_rate"] for r in results) / total,
-            "agreement_rate": sum(r["judge"]["agreement_rate"] for r in results) / total
-        }
+            "mrr": sum(r["ragas"]["retrieval"]["mrr"] for r in results) / total,
+            "agreement_rate": sum(r["judge"]["agreement_rate"] for r in results) / total,
+            "batch_cohens_kappa": batch_kappa,
+            "avg_faithfulness": sum(r["ragas"]["faithfulness"] for r in results) / total,
+            "avg_relevancy": sum(r["ragas"]["relevancy"] for r in results) / total,
+            "pass_rate": len(passed) / total,
+            "avg_latency_seconds": avg_latency,
+            "p95_latency_seconds": p95_latency,
+            "total_tokens": total_tokens,
+            "total_agent_tokens": total_agent_tokens,
+            "total_judge_tokens": total_judge_tokens,
+            "avg_tokens_per_case": total_tokens / total if total else 0.0,
+            "avg_agent_tokens_per_case": total_agent_tokens / total if total else 0.0,
+            "avg_judge_tokens_per_case": total_judge_tokens / total if total else 0.0,
+            "total_estimated_cost_usd": total_cost,
+            "avg_estimated_cost_per_case_usd": total_cost / total if total else 0.0,
+            "error_rate": (total - len(non_error)) / total if total else 0.0,
+        },
+        "runner_config": {
+            "max_concurrency": runner.max_concurrency,
+            "timeout_seconds": runner.timeout_seconds,
+            "max_retries": runner.max_retries,
+        },
     }
     return results, summary
 

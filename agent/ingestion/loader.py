@@ -1,6 +1,5 @@
 from pathlib import Path
 from typing import List, Dict
-from pypdf import PdfReader
 
 
 class DocumentLoader:
@@ -13,6 +12,8 @@ class DocumentLoader:
         raise ValueError(f"Unsupported file type: {p.suffix}")
 
     def _load_pdf(self, path: Path) -> List[Dict]:
+        from pypdf import PdfReader
+
         reader = PdfReader(str(path))
         docs = []
         for i, page in enumerate(reader.pages):

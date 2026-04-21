@@ -1,7 +1,7 @@
 from typing import List, Dict
 
-from ingestion.embedder import Embedder
-from retrieval.vector_store import VectorStore
+from ..ingestion.embedder import Embedder
+from .vector_store import VectorStore
 
 
 class Retriever:

@@ -5,13 +5,13 @@ from dotenv import load_dotenv
 import os
 
 
-from ingestion.embedder import Embedder
-from ingestion.pipeline import IngestionPipeline
-from retrieval.vector_store import VectorStore
-from retrieval.retriever import Retriever
-from retrieval.reranker import Reranker
-from llm.client import LLMClient
-from llm.generator import Generator
+from .ingestion.embedder import Embedder
+from .ingestion.pipeline import IngestionPipeline
+from .retrieval.vector_store import VectorStore
+from .retrieval.retriever import Retriever
+from .retrieval.reranker import Reranker
+from .llm.client import LLMClient
+from .llm.generator import Generator
 
 load_dotenv()
 DOCS_FOLDER_PATH = "data/docs"

@@ -1,5 +1,9 @@
 from typing import List, Dict
-import tiktoken
+
+try:
+    import tiktoken
+except ImportError:
+    tiktoken = None
 
 
 class TokenTextSplitter:
@@ -12,10 +16,13 @@ class TokenTextSplitter:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
-        try:
-            self.encoding = tiktoken.encoding_for_model(model_name)
-        except KeyError:
-            self.encoding = tiktoken.get_encoding("cl100k_base")
+        if tiktoken is None:
+            self.encoding = None
+        else:
+            try:
+                self.encoding = tiktoken.encoding_for_model(model_name)
+            except KeyError:
+                self.encoding = tiktoken.get_encoding("cl100k_base")
 
     def split(self, docs: List[Dict]) -> List[Dict]:
         chunks = []
@@ -32,6 +39,20 @@ class TokenTextSplitter:
         return chunks
 
     def _split_text(self, text: str) -> List[str]:
+        if self.encoding is None:
+            words = text.split()
+            chunks = []
+            start = 0
+            n_words = len(words)
+            step = max(1, self.chunk_size - self.chunk_overlap)
+
+            while start < n_words:
+                end = min(start + self.chunk_size, n_words)
+                chunks.append(" ".join(words[start:end]))
+                start += step
+
+            return chunks or [text]
+
         tokens = self.encoding.encode(text)
 
         chunks = []
