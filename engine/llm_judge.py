@@ -88,7 +88,7 @@ class LLMJudge:
             "tokens": response.usage.total_tokens,
         }
 
-    async def _call_gemini(self, prompt: str, model: str = "gemini-2.0-flash") -> Dict[str, Any]:
+    async def _call_gemini(self, prompt: str, model: str = "gemini-2.5-flash") -> Dict[str, Any]:
         response = await self._gemini_model.generate_content_async(prompt)
         result = json.loads(response.text)
         tokens = response.usage_metadata.total_token_count if response.usage_metadata else 0
@@ -210,11 +210,11 @@ class LLMJudge:
             "cohens_kappa": kappa,
             "individual_scores": {
                 "gpt-4o": score_gpt,
-                "gemini-2.0-flash": score_gemini,
+                "gemini-2.5-flash": score_gemini,
             },
             "reasoning": {
                 "gpt-4o": result_gpt["reasoning"],
-                "gemini-2.0-flash": result_gemini["reasoning"],
+                "gemini-2.5-flash": result_gemini["reasoning"],
             },
             "conflict_resolved": conflict_resolved,
             "resolution_method": resolution_method,
