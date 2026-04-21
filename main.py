@@ -3,25 +3,21 @@ import json
 import os
 import time
 from engine.runner import BenchmarkRunner
+from engine.llm_judge import LLMJudge
 from agent.main_agent import MainAgent
 
 # Giả lập các components Expert
 class ExpertEvaluator:
-    async def score(self, case, resp): 
+    async def score(self, case, resp):
         # Giả lập tính toán Hit Rate và MRR
         return {
-            "faithfulness": 0.9, 
+            "faithfulness": 0.9,
             "relevancy": 0.8,
             "retrieval": {"hit_rate": 1.0, "mrr": 0.5}
         }
 
-class MultiModelJudge:
-    async def evaluate_multi_judge(self, q, a, gt): 
-        return {
-            "final_score": 4.5, 
-            "agreement_rate": 0.8,
-            "reasoning": "Cả 2 model đồng ý đây là câu trả lời tốt."
-        }
+# Dùng LLMJudge thực thay cho placeholder
+MultiModelJudge = LLMJudge
 
 async def run_benchmark_with_results(agent_version: str):
     print(f"🚀 Khởi động Benchmark cho {agent_version}...")
