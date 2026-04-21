@@ -13,10 +13,13 @@ class SectionTokenTextSplitter:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
-        try:
-            self.encoding = tiktoken.encoding_for_model(model_name)
-        except KeyError:
-            self.encoding = tiktoken.get_encoding("cl100k_base")
+        if tiktoken is None:
+            self.encoding = None
+        else:
+            try:
+                self.encoding = tiktoken.encoding_for_model(model_name)
+            except KeyError:
+                self.encoding = tiktoken.get_encoding("cl100k_base")
 
     def split(self, docs: List[Dict]) -> List[Dict]:
         chunks = []

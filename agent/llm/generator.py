@@ -1,7 +1,7 @@
 from typing import List, Dict
 
-from llm.client import LLMClient
-from llm.prompt import build_rag_messages
+from .client import LLMClient
+from .prompt import build_rag_messages
 
 class Generator:
     def __init__(self, client: LLMClient):
@@ -28,6 +28,6 @@ class Generator:
             "contexts": context_items,
             "metadata": {
                 "model": self.client.model,
-                "sources": sources,
+                "sources": sources
             },
         }

@@ -18,7 +18,9 @@ Câu trả lời:"""
 
 
 def build_rag_messages(question: str, contexts: List[Dict]) -> List[dict]:
-    context_str = "\n\n".join(f"[{i + 1}] {c['text']}" for i, c in enumerate(contexts))
+    # Đảm bảo contexts là list[dict] có key 'text', nếu là str thì chuyển thành dict
+    norm_contexts = [c if isinstance(c, dict) else {"text": str(c)} for c in contexts]
+    context_str = "\n\n".join(f"[{i + 1}] {c['text']}" for i, c in enumerate(norm_contexts))
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": USER_TEMPLATE.format(context=context_str, question=question)},

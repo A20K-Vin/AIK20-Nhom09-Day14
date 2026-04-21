@@ -28,14 +28,86 @@ class RetrievalEvaluator:
         Chạy eval cho toàn bộ bộ dữ liệu.
         Dataset cần có trường 'expected_retrieval_ids' và Agent trả về 'retrieved_ids'.
         """
-        # Placeholder logic
-        total_hit_rate = 0
-        total_mrr = 0
-        for data in dataset:
-            expected_ids = data['expected_retrieval_ids']
-            retrieved_ids = data['retrieved_ids']
-            total_hit_rate += self.calculate_hit_rate(expected_ids, retrieved_ids)
-            total_mrr += self.calculate_mrr(expected_ids, retrieved_ids)
-        avg_hit_rate = total_hit_rate / len(dataset)
-        avg_mrr = total_mrr / len(dataset)
-        return {"avg_hit_rate": avg_hit_rate, "avg_mrr": avg_mrr}
+        if not dataset:
+            return {"avg_hit_rate": 0.0, "avg_mrr": 0.0}
+
+        hit_rates = []
+        mrr_scores = []
+        for item in dataset:
+            expected_ids = item.get("expected_retrieval_ids", [])
+            retrieved_ids = item.get("retrieved_ids", [])
+            if expected_ids and retrieved_ids:
+                hit_rates.append(self.calculate_hit_rate(expected_ids, retrieved_ids))
+                mrr_scores.append(self.calculate_mrr(expected_ids, retrieved_ids))
+                continue
+
+            expected_context = item.get("expected_context", "")
+            retrieved_contexts = item.get("retrieved_contexts", [])
+            hit_rates.append(self.calculate_context_hit_rate(expected_context, retrieved_contexts))
+            mrr_scores.append(self.calculate_context_mrr(expected_context, retrieved_contexts))
+
+        return {
+            "avg_hit_rate": sum(hit_rates) / len(hit_rates),
+            "avg_mrr": sum(mrr_scores) / len(mrr_scores),
+        }
+
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        return " ".join((text or "").lower().split())
+
+    def calculate_context_hit_rate(
+        self, expected_context: str, retrieved_contexts: List[str], overlap_threshold: float = 0.35
+    ) -> float:
+        """
+        Fallback retrieval quality when no doc IDs are available.
+        We compute token-overlap between expected context and each retrieved context.
+        Hit = 1 if at least one overlap ratio >= threshold.
+        """
+        expected_tokens = set(self._normalize_text(expected_context).split())
+        if not expected_tokens:
+            return 0.0
+
+        for ctx in retrieved_contexts:
+            ctx_tokens = set(self._normalize_text(ctx).split())
+            if not ctx_tokens:
+                continue
+            overlap = len(expected_tokens.intersection(ctx_tokens)) / len(expected_tokens)
+            if overlap >= overlap_threshold:
+                return 1.0
+        return 0.0
+
+    def calculate_context_mrr(
+        self, expected_context: str, retrieved_contexts: List[str], overlap_threshold: float = 0.35
+    ) -> float:
+        expected_tokens = set(self._normalize_text(expected_context).split())
+        if not expected_tokens:
+            return 0.0
+
+        for i, ctx in enumerate(retrieved_contexts):
+            ctx_tokens = set(self._normalize_text(ctx).split())
+            if not ctx_tokens:
+                continue
+            overlap = len(expected_tokens.intersection(ctx_tokens)) / len(expected_tokens)
+            if overlap >= overlap_threshold:
+                return 1.0 / (i + 1)
+        return 0.0
+
+    def evaluate_case(self, test_case: Dict, response: Dict, top_k: int = 3) -> Dict:
+        metadata = test_case.get("metadata", {})
+        expected_ids = metadata.get("ground_truth_ids") or test_case.get("expected_retrieval_ids", [])
+        retrieved_ids = response.get("metadata", {}).get("retrieved_ids", [])
+
+        if expected_ids and retrieved_ids:
+            return {
+                "hit_rate": self.calculate_hit_rate(expected_ids, retrieved_ids, top_k=top_k),
+                "mrr": self.calculate_mrr(expected_ids, retrieved_ids),
+                "evaluation_mode": "ground_truth_ids",
+            }
+
+        expected_context = test_case.get("context", "")
+        retrieved_contexts = response.get("contexts", [])
+        return {
+            "hit_rate": self.calculate_context_hit_rate(expected_context, retrieved_contexts),
+            "mrr": self.calculate_context_mrr(expected_context, retrieved_contexts),
+            "evaluation_mode": "context_overlap",
+        }
