@@ -78,7 +78,8 @@ if __name__ == "__main__":
         print("\n=== Retrieved Contexts ===")
         for i, ctx in enumerate(contexts, 1):
             print(f"\n--- Context {i} ---")
-            print(ctx)
+            print(f"Chunk ID: {ctx.get('chunk_id', 'N/A')}")
+            print(f"Text: {ctx['text']}")
         print()
         print("\n=== Metadata ===")
         print(metadata)

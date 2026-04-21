@@ -1,4 +1,4 @@
-from typing import List
+from typing import Dict, List
 
 SYSTEM_PROMPT = (
     "Bạn là trợ lý hỗ trợ khách hàng chuyên nghiệp. "
@@ -17,8 +17,8 @@ Câu hỏi: {question}
 Câu trả lời:"""
 
 
-def build_rag_messages(question: str, contexts: List[str]) -> List[dict]:
-    context_str = "\n\n".join(f"[{i + 1}] {c}" for i, c in enumerate(contexts))
+def build_rag_messages(question: str, contexts: List[Dict]) -> List[dict]:
+    context_str = "\n\n".join(f"[{i + 1}] {c['text']}" for i, c in enumerate(contexts))
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": USER_TEMPLATE.format(context=context_str, question=question)},

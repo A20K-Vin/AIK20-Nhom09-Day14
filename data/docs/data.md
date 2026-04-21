@@ -1,6 +1,3 @@
-Dưới đây là nội dung "Quy định tài chính và Biểu phí" của VinUni được chuyển đổi sang định dạng Markdown từ tài liệu bạn cung cấp:
-
-```markdown
 # QUY ĐỊNH TÀI CHÍNH VÀ BIỂU PHÍ
 
 ## MỤC LỤC
@@ -256,4 +253,3 @@ Dưới đây là nội dung "Quy định tài chính và Biểu phí" của Vin
 * Trường hợp Sinh viên có nhu cầu đặc biệt cần xuất hóa đơn cho một tổ chức thì Sinh viên phải gửi yêu cầu và nộp đầy đủ các Hồ sơ theo quy định cho phòng Tài chính - Kế toán của Trường trước thời hạn đóng Học phí và các khoản phí.
 * Trong trường hợp thông tin viết hoá đơn không được cung cấp trước thời hạn đó, hoá đơn tài chính điện tử sẽ được xuất theo tên và địa chỉ mặc định của Sinh viên.
 * Hóa đơn tài chính điện tử chính thức được phát hành không bao gồm các khoản phí thu hộ cho bên thứ ba (VD: Phí bảo hiểm y tế bắt buộc thu hộ Cơ quan Bảo hiểm Xã hội/Đơn vị cung cấp bảo hiểm, Phí khám sức khỏe tổng quát thu hộ Bệnh viện).
-```

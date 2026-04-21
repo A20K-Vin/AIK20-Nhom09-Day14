@@ -1,8 +1,9 @@
 from typing import List, Dict
+import re
 import tiktoken
 
 
-class TokenTextSplitter:
+class SectionTokenTextSplitter:
     def __init__(
         self,
         chunk_size: int = 256,
@@ -21,18 +22,59 @@ class TokenTextSplitter:
         chunks = []
 
         for doc in docs:
-            token_chunks = self._split_text(doc["text"])
+            sections = self._split_sections(doc["text"])
 
-            for chunk_text in token_chunks:
-                chunks.append({
-                    **doc,
-                    "text": chunk_text
-                })
+            for section_title, section_text in sections:
+                sub_chunks = self._split_if_needed(section_text)
+
+                for chunk_text in sub_chunks:
+                    chunks.append({
+                        **doc,
+                        "text": chunk_text,
+                        "section": section_title,
+                        "id": section_title
+                    })
 
         return chunks
 
-    def _split_text(self, text: str) -> List[str]:
+    # =========================
+    # 1. Split theo section
+    # =========================
+    def _split_sections(self, text: str):
+        pattern = r"(#{2,4} .+)"  # match ##, ###, ####
+
+        parts = re.split(pattern, text)
+
+        sections = []
+        current_title = "intro"
+        current_text = ""
+
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+
+            if re.match(pattern, part):
+                if current_text:
+                    sections.append((current_title, current_text.strip()))
+                current_title = part
+                current_text = ""
+            else:
+                current_text += "\n" + part
+
+        if current_text:
+            sections.append((current_title, current_text.strip()))
+
+        return sections
+
+    # =========================
+    # 2. Token split nếu quá dài
+    # =========================
+    def _split_if_needed(self, text: str) -> List[str]:
         tokens = self.encoding.encode(text)
+
+        if len(tokens) <= self.chunk_size:
+            return [text]
 
         chunks = []
         start = 0

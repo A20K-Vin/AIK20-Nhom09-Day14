@@ -22,8 +22,10 @@ class VectorStore:
         vecs = np.array(embeddings, dtype="float32")
         faiss.normalize_L2(vecs)
         self.index.add(vecs)
-        for text, meta in zip(texts, metadata):
-            self.metadata.append({**meta, "text": text})
+        for idx, (text, meta) in enumerate(zip(texts, metadata)):
+            # Đảm bảo mỗi chunk có chunk_id duy nhất
+            chunk_id = meta.get("chunk_id") or meta.get("id") or f"chunk_{len(self.metadata)+1}"
+            self.metadata.append({**meta, "text": text, "chunk_id": chunk_id})
 
     def search(self, query_embedding: List[float], top_k: int = 5) -> List[Dict]:
         vec = np.array([query_embedding], dtype="float32")
@@ -33,7 +35,10 @@ class VectorStore:
         for score, idx in zip(scores[0], indices[0]):
             if idx == -1:
                 continue
-            results.append({**self.metadata[idx], "score": float(score)})
+            meta = self.metadata[idx]
+            # Đảm bảo luôn có chunk_id
+            chunk_id = meta.get("chunk_id") or meta.get("id") or f"chunk_{idx+1}"
+            results.append({**meta, "chunk_id": chunk_id, "score": float(score)})
         return results
 
     def save(self):

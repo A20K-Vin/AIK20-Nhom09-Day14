@@ -1,14 +1,14 @@
 from typing import List
 
 from ingestion.loader import DocumentLoader
-from ingestion.splitter import TokenTextSplitter
+from ingestion.splitter import SectionTokenTextSplitter
 from ingestion.embedder import Embedder
 
 
 class IngestionPipeline:
     def __init__(self, vector_store, chunk_size: int = 512, chunk_overlap: int = 64):
         self.loader = DocumentLoader()
-        self.splitter = TokenTextSplitter(chunk_size, chunk_overlap)
+        self.splitter = SectionTokenTextSplitter(chunk_size, chunk_overlap)
         self.embedder = Embedder()
         self.vector_store = vector_store
 
