@@ -29,4 +29,13 @@ class RetrievalEvaluator:
         Dataset cần có trường 'expected_retrieval_ids' và Agent trả về 'retrieved_ids'.
         """
         # Placeholder logic
-        return {"avg_hit_rate": 0.85, "avg_mrr": 0.72}
+        total_hit_rate = 0
+        total_mrr = 0
+        for data in dataset:
+            expected_ids = data['expected_retrieval_ids']
+            retrieved_ids = data['retrieved_ids']
+            total_hit_rate += self.calculate_hit_rate(expected_ids, retrieved_ids)
+            total_mrr += self.calculate_mrr(expected_ids, retrieved_ids)
+        avg_hit_rate = total_hit_rate / len(dataset)
+        avg_mrr = total_mrr / len(dataset)
+        return {"avg_hit_rate": avg_hit_rate, "avg_mrr": avg_mrr}

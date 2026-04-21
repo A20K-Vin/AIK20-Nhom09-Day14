@@ -4,6 +4,7 @@ import os
 import time
 from engine.runner import BenchmarkRunner
 from agent.main_agent import MainAgent
+from engine.retrieval_eval import RetrievalEvaluator
 
 # Giả lập các components Expert
 class ExpertEvaluator:
