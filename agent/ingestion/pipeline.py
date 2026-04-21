@@ -1,8 +1,8 @@
 from typing import List
 
-from ingestion.loader import DocumentLoader
-from ingestion.splitter import SectionTokenTextSplitter
-from ingestion.embedder import Embedder
+from .loader import DocumentLoader
+from .splitter import SectionTokenTextSplitter
+from .embedder import Embedder
 
 
 class IngestionPipeline:

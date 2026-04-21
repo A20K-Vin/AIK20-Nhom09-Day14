@@ -1,6 +1,10 @@
 from typing import List, Dict
 import re
-import tiktoken
+
+try:
+    import tiktoken
+except ImportError:
+    tiktoken = None
 
 
 class SectionTokenTextSplitter:
@@ -74,6 +78,20 @@ class SectionTokenTextSplitter:
     # 2. Token split nếu quá dài
     # =========================
     def _split_if_needed(self, text: str) -> List[str]:
+        if self.encoding is None:
+            words = text.split()
+            if len(words) <= self.chunk_size:
+                return [text]
+
+            chunks = []
+            start = 0
+            step = max(1, self.chunk_size - self.chunk_overlap)
+            while start < len(words):
+                end = min(start + self.chunk_size, len(words))
+                chunks.append(" ".join(words[start:end]))
+                start += step
+            return chunks
+
         tokens = self.encoding.encode(text)
 
         if len(tokens) <= self.chunk_size:

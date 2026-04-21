@@ -4,14 +4,13 @@ from typing import Dict, List, Optional
 from dotenv import load_dotenv
 import os
 
-
-from ingestion.embedder import Embedder
-from ingestion.pipeline import IngestionPipeline
-from retrieval.vector_store import VectorStore
-from retrieval.retriever import Retriever
-from retrieval.reranker import Reranker
-from llm.client import LLMClient
-from llm.generator import Generator
+from .ingestion.embedder import Embedder
+from .ingestion.pipeline import IngestionPipeline
+from .retrieval.vector_store import VectorStore
+from .retrieval.retriever import Retriever
+from .retrieval.reranker import Reranker
+from .llm.client import LLMClient
+from .llm.generator import Generator
 
 load_dotenv()
 DOCS_FOLDER_PATH = "data/docs"
@@ -24,9 +23,11 @@ class MainAgent:
         top_k: int = 5,
         rerank_top_k: int = 3,
         persist_path: str = ".vector_store",
+        use_reranker: bool = True,
     ):
         self.name = "SupportAgent-v1"
         self.rerank_top_k = rerank_top_k
+        self.use_reranker = use_reranker
 
         embedder = Embedder()
         self.vector_store = VectorStore(persist_path=persist_path)
@@ -47,8 +48,12 @@ class MainAgent:
 
     async def query(self, question: str) -> Dict:
         candidates = self.retriever.retrieve(question)
-        reranked = self.reranker.rerank(question, candidates, top_k=self.rerank_top_k)
-        return await self.generator.generate(question, reranked)
+        final_contexts = candidates
+        if self.use_reranker:
+            final_contexts = self.reranker.rerank(question, candidates, top_k=self.rerank_top_k)
+        else:
+            final_contexts = candidates[: self.rerank_top_k]
+        return await self.generator.generate(question, final_contexts)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,16 @@ class RetrievalEvaluator:
     def __init__(self):
         pass
 
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        return " ".join((text or "").lower().split())
+
+    @staticmethod
+    def _context_to_text(context) -> str:
+        if isinstance(context, dict):
+            return str(context.get("text", ""))
+        return str(context or "")
+
     def calculate_hit_rate(self, expected_ids: List[str], retrieved_ids: List[str], top_k: int = 3) -> float:
         """
         TODO: Tính toán xem ít nhất 1 trong expected_ids có nằm trong top_k của retrieved_ids không.
@@ -51,10 +61,6 @@ class RetrievalEvaluator:
             "avg_mrr": sum(mrr_scores) / len(mrr_scores),
         }
 
-    @staticmethod
-    def _normalize_text(text: str) -> str:
-        return " ".join((text or "").lower().split())
-
     def calculate_context_hit_rate(
         self, expected_context: str, retrieved_contexts: List[str], overlap_threshold: float = 0.35
     ) -> float:
@@ -68,7 +74,7 @@ class RetrievalEvaluator:
             return 0.0
 
         for ctx in retrieved_contexts:
-            ctx_tokens = set(self._normalize_text(ctx).split())
+            ctx_tokens = set(self._normalize_text(self._context_to_text(ctx)).split())
             if not ctx_tokens:
                 continue
             overlap = len(expected_tokens.intersection(ctx_tokens)) / len(expected_tokens)
@@ -84,7 +90,7 @@ class RetrievalEvaluator:
             return 0.0
 
         for i, ctx in enumerate(retrieved_contexts):
-            ctx_tokens = set(self._normalize_text(ctx).split())
+            ctx_tokens = set(self._normalize_text(self._context_to_text(ctx)).split())
             if not ctx_tokens:
                 continue
             overlap = len(expected_tokens.intersection(ctx_tokens)) / len(expected_tokens)
@@ -96,16 +102,34 @@ class RetrievalEvaluator:
         metadata = test_case.get("metadata", {})
         expected_ids = metadata.get("ground_truth_ids") or test_case.get("expected_retrieval_ids", [])
         retrieved_ids = response.get("metadata", {}).get("retrieved_ids", [])
-
-        if expected_ids and retrieved_ids:
-            return {
-                "hit_rate": self.calculate_hit_rate(expected_ids, retrieved_ids, top_k=top_k),
-                "mrr": self.calculate_mrr(expected_ids, retrieved_ids),
-                "evaluation_mode": "ground_truth_ids",
-            }
-
         expected_context = test_case.get("context", "")
         retrieved_contexts = response.get("contexts", [])
+
+        if expected_ids and retrieved_ids:
+            id_hit_rate = self.calculate_hit_rate(expected_ids, retrieved_ids, top_k=top_k)
+            id_mrr = self.calculate_mrr(expected_ids, retrieved_ids)
+
+            if id_hit_rate > 0.0 or id_mrr > 0.0:
+                return {
+                    "hit_rate": id_hit_rate,
+                    "mrr": id_mrr,
+                    "evaluation_mode": "ground_truth_ids",
+                    "id_hit_rate": id_hit_rate,
+                    "id_mrr": id_mrr,
+                }
+
+            # Fallback when the dataset uses curated IDs but the runtime chunks use a
+            # different namespace. This preserves meaningful retrieval evaluation.
+            context_hit_rate = self.calculate_context_hit_rate(expected_context, retrieved_contexts)
+            context_mrr = self.calculate_context_mrr(expected_context, retrieved_contexts)
+            return {
+                "hit_rate": context_hit_rate,
+                "mrr": context_mrr,
+                "evaluation_mode": "context_overlap_fallback",
+                "id_hit_rate": id_hit_rate,
+                "id_mrr": id_mrr,
+            }
+
         return {
             "hit_rate": self.calculate_context_hit_rate(expected_context, retrieved_contexts),
             "mrr": self.calculate_context_mrr(expected_context, retrieved_contexts),

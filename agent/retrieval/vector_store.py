@@ -21,8 +21,22 @@ class VectorStore:
 
     def add(self, texts: List[str], embeddings: List[List[float]], metadata: List[Dict]):
         vecs = np.array(embeddings, dtype="float32")
-        faiss.normalize_L2(vecs)
-        self.index.add(vecs)
+        if vecs.size == 0:
+            return
+
+        if faiss:
+            faiss.normalize_L2(vecs)
+        else:
+            norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+            norms[norms == 0] = 1.0
+            vecs = vecs / norms
+
+        if self.index is not None:
+            self.index.add(vecs)
+        elif self._vectors.size == 0:
+            self._vectors = vecs.copy()
+        else:
+            self._vectors = np.vstack([self._vectors, vecs])
         for idx, (text, meta) in enumerate(zip(texts, metadata)):
             # Đảm bảo mỗi chunk có chunk_id duy nhất
             chunk_id = meta.get("chunk_id") or meta.get("id") or f"chunk_{len(self.metadata)+1}"

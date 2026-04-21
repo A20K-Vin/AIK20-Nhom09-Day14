@@ -20,14 +20,26 @@ class Generator:
             for c in contexts
         ]
         messages = build_rag_messages(question, [c["text"] for c in context_items])
-        answer = await self.client.complete(messages)
+        completion = await self.client.complete(messages)
+        answer = completion["content"]
 
         sources = list({c.get("source", "") for c in context_items if c.get("source")})
+        retrieved_ids = []
+        for idx, context in enumerate(context_items, start=1):
+            chunk_id = (
+                context.get("chunk_id")
+                or context.get("id")
+                or f"{context.get('source', 'unknown')}#chunk{idx}"
+            )
+            retrieved_ids.append(str(chunk_id))
+
         return {
             "answer": answer,
             "contexts": context_items,
             "metadata": {
                 "model": self.client.model,
-                "sources": sources
+                "sources": sources,
+                "retrieved_ids": retrieved_ids,
+                "usage": completion["usage"],
             },
         }

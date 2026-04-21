@@ -68,7 +68,11 @@ class BenchmarkRunner:
 
                     answer = response["answer"]
                     contexts = response.get("contexts", [])
-                    context_text = "\n".join(contexts)
+                    context_texts = [
+                        ctx.get("text", "") if isinstance(ctx, dict) else str(ctx)
+                        for ctx in contexts
+                    ]
+                    context_text = "\n".join(context_texts)
                     agent_usage = response.get("metadata", {}).get("usage", {})
                     agent_prompt_tokens = int(agent_usage.get("prompt_tokens", 0))
                     agent_completion_tokens = int(agent_usage.get("completion_tokens", 0))
@@ -84,7 +88,13 @@ class BenchmarkRunner:
 
                     return {
                         "test_case": question,
+                        "expected_answer": expected_answer,
+                        "reference_context": test_case.get("context", ""),
+                        "case_metadata": test_case.get("metadata", {}),
                         "agent_response": answer,
+                        "retrieved_contexts": context_texts,
+                        "retrieved_ids": response.get("metadata", {}).get("retrieved_ids", []),
+                        "retrieved_sources": response.get("metadata", {}).get("sources", []),
                         "latency": total_latency,
                         "latency_breakdown": {
                             "agent_seconds": agent_latency,
@@ -115,7 +125,13 @@ class BenchmarkRunner:
             total_latency = time.perf_counter() - started_at
             return {
                 "test_case": question,
+                "expected_answer": expected_answer,
+                "reference_context": test_case.get("context", ""),
+                "case_metadata": test_case.get("metadata", {}),
                 "agent_response": "",
+                "retrieved_contexts": [],
+                "retrieved_ids": [],
+                "retrieved_sources": [],
                 "latency": total_latency,
                 "latency_breakdown": {
                     "agent_seconds": None,
@@ -140,5 +156,20 @@ class BenchmarkRunner:
             }
 
     async def run_all(self, dataset: List[Dict]) -> List[Dict]:
-        tasks = [self.run_single_test(case) for case in dataset]
-        return await asyncio.gather(*tasks)
+        tasks = [asyncio.create_task(self.run_single_test(case)) for case in dataset]
+        total = len(tasks)
+        results = []
+        for completed_count, task in enumerate(asyncio.as_completed(tasks), start=1):
+            result = await task
+            results.append(result)
+            status = result.get("status", "unknown").upper()
+            score = result.get("judge", {}).get("final_score", 0.0)
+            error_detail = ""
+            if status == "ERROR" and result.get("error"):
+                short_error = str(result["error"]).replace("\n", " ").strip()
+                error_detail = f" | error={short_error[:120]}"
+            print(
+                f"[Benchmark] {completed_count}/{total} | {status} | score={score:.2f} | {result.get('test_case', '')}{error_detail}",
+                flush=True,
+            )
+        return results

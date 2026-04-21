@@ -4,10 +4,6 @@ import os
 from typing import Dict, Any, List, Tuple
 
 from openai import AsyncOpenAI
-try:
-    import google.generativeai as genai
-except ImportError:
-    genai = None
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -54,20 +50,9 @@ Câu trả lời nào tốt hơn? Trả lời theo JSON:
 class LLMJudge:
     def __init__(self):
         self.openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.secondary_model_name = "gpt-4o-mini"
-        self._gemini_model = None
-
-        google_api_key = os.getenv("GOOGLE_API_KEY")
-        if genai is not None and google_api_key:
-            genai.configure(api_key=google_api_key)
-            self._gemini_model = genai.GenerativeModel(
-                "gemini-2.5-flash",
-                generation_config=genai.GenerationConfig(
-                    response_mime_type="application/json",
-                    temperature=0,
-                ),
-            )
-            self.secondary_model_name = "gemini-2.5-flash"
+        self.primary_model_name = "gpt-4o"
+        self.secondary_openai_model_name = "gpt-4o-mini"
+        self.secondary_model_name = self.secondary_openai_model_name
 
         self.rubrics = {
             "accuracy": "Độ chính xác so với Ground Truth (1-5)",
@@ -96,21 +81,15 @@ class LLMJudge:
             "tokens": response.usage.total_tokens,
         }
 
-    async def _call_gemini(self, prompt: str, model: str = "gemini-2.5-flash") -> Dict[str, Any]:
-        if self._gemini_model is None:
-            fallback = await self._call_gpt(prompt, model="gpt-4o-mini")
-            fallback["model"] = self.secondary_model_name
-            return fallback
-
-        response = await self._gemini_model.generate_content_async(prompt)
-        result = json.loads(response.text)
-        tokens = response.usage_metadata.total_token_count if response.usage_metadata else 0
-        return {
-            "score": int(result["score"]),
-            "reasoning": result.get("reasoning", ""),
-            "model": model,
-            "tokens": tokens,
-        }
+    async def _call_secondary_judge(self, prompt: str) -> Dict[str, Any]:
+        """
+        Judge thứ 2 cố định bằng OpenAI để luôn có 2 judge:
+        gpt-4o (primary) + gpt-4o-mini (secondary).
+        """
+        fallback = await self._call_gpt(prompt, model=self.secondary_openai_model_name)
+        fallback["model"] = self.secondary_openai_model_name
+        self.secondary_model_name = self.secondary_openai_model_name
+        return fallback
 
     # ------------------------------------------------------------------
     # Agreement metrics
@@ -191,32 +170,33 @@ class LLMJudge:
             question=question, answer=answer, ground_truth=ground_truth
         )
 
-        result_gpt, result_gemini = await asyncio.gather(
-            self._call_gpt(prompt, model="gpt-4o"),
-            self._call_gemini(prompt),
+        result_gpt, result_secondary = await asyncio.gather(
+            self._call_gpt(prompt, model=self.primary_model_name),
+            self._call_secondary_judge(prompt),
         )
 
         score_gpt = result_gpt["score"]
-        score_gemini = result_gemini["score"]
-        diff = abs(score_gpt - score_gemini)
+        score_secondary = result_secondary["score"]
+        diff = abs(score_gpt - score_secondary)
 
         exact_agreement = diff == 0
         near_agreement = diff <= 1
         agreement_rate = 1.0 if exact_agreement else (0.5 if near_agreement else 0.0)
-        kappa = self._cohens_kappa_single(score_gpt, score_gemini)
+        kappa = self._cohens_kappa_single(score_gpt, score_secondary)
 
         conflict_resolved = False
         resolution_method = "average"
         tiebreaker_tokens = 0
         if diff > 1:
             final_score, resolution_method, tiebreaker_tokens = await self._resolve_conflict(
-                question, answer, ground_truth, score_gpt, score_gemini
+                question, answer, ground_truth, score_gpt, score_secondary
             )
             conflict_resolved = True
         else:
-            final_score = (score_gpt + score_gemini) / 2.0
+            final_score = (score_gpt + score_secondary) / 2.0
 
-        total_tokens = result_gpt["tokens"] + result_gemini["tokens"] + tiebreaker_tokens
+        secondary_model_name = result_secondary.get("model", self.secondary_model_name)
+        total_tokens = result_gpt["tokens"] + result_secondary["tokens"] + tiebreaker_tokens
 
         return {
             "final_score": final_score,
@@ -224,15 +204,15 @@ class LLMJudge:
             "cohens_kappa": kappa,
             "individual_scores": {
                 "gpt-4o": score_gpt,
-                self.secondary_model_name: score_gemini,
+                secondary_model_name: score_secondary,
             },
             "reasoning": {
                 "gpt-4o": result_gpt["reasoning"],
-                self.secondary_model_name: result_gemini["reasoning"],
+                secondary_model_name: result_secondary["reasoning"],
             },
             "token_usage": {
                 "gpt-4o": result_gpt["tokens"],
-                self.secondary_model_name: result_gemini["tokens"],
+                secondary_model_name: result_secondary["tokens"],
                 "tiebreaker_gpt-4o-mini": tiebreaker_tokens,
                 "total_tokens": total_tokens,
             },
@@ -265,14 +245,14 @@ class LLMJudge:
             label_b="A", answer_b=response_a,
         )
 
-        (res_ab_gpt, res_ba_gpt), (res_ab_gemini, res_ba_gemini) = await asyncio.gather(
+        (res_ab_gpt, res_ba_gpt), (res_ab_secondary, res_ba_secondary) = await asyncio.gather(
             asyncio.gather(
                 self._call_gpt_pairwise(prompt_ab),
                 self._call_gpt_pairwise(prompt_ba),
             ),
             asyncio.gather(
-                self._call_gemini_pairwise(prompt_ab),
-                self._call_gemini_pairwise(prompt_ba),
+                self._call_secondary_pairwise(prompt_ab),
+                self._call_secondary_pairwise(prompt_ba),
             ),
         )
 
@@ -280,21 +260,21 @@ class LLMJudge:
             return (forward == "A" and backward == "B") or (forward == "B" and backward == "A")
 
         biased_gpt = _is_biased(res_ab_gpt, res_ba_gpt)
-        biased_gemini = _is_biased(res_ab_gemini, res_ba_gemini)
+        biased_secondary = _is_biased(res_ab_secondary, res_ba_secondary)
 
         return {
             "gpt_position_biased": biased_gpt,
-            "gemini_position_biased": biased_gemini,
-            "overall_biased": biased_gpt or biased_gemini,
+            "secondary_position_biased": biased_secondary,
+            "overall_biased": biased_gpt or biased_secondary,
             "detail": {
                 "gpt": {"ab": res_ab_gpt, "ba": res_ba_gpt},
-                "gemini": {"ab": res_ab_gemini, "ba": res_ba_gemini},
+                "secondary": {"ab": res_ab_secondary, "ba": res_ba_secondary},
             },
         }
 
-    async def _call_gpt_pairwise(self, prompt: str) -> str:
+    async def _call_gpt_pairwise(self, prompt: str, model: str = "gpt-4o") -> str:
         response = await self.openai_client.chat.completions.create(
-            model="gpt-4o",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             response_format={"type": "json_object"},
@@ -302,13 +282,10 @@ class LLMJudge:
         result = json.loads(response.choices[0].message.content)
         return result.get("winner", "tie")
 
-    async def _call_gemini_pairwise(self, prompt: str) -> str:
-        if self._gemini_model is None:
-            return await self._call_gpt_pairwise(prompt)
-
-        response = await self._gemini_model.generate_content_async(prompt)
-        result = json.loads(response.text)
-        return result.get("winner", "tie")
+    async def _call_secondary_pairwise(self, prompt: str) -> str:
+        return await self._call_gpt_pairwise(
+            prompt, model=self.secondary_openai_model_name
+        )
 
 
 # ---------------------------------------------------------------------------
